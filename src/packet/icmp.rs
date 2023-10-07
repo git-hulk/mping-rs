@@ -11,6 +11,7 @@ pub enum Error {
     InvalidPacket,
 }
 
+
 pub struct IcmpV4;
 pub struct IcmpV6;
 
@@ -73,7 +74,7 @@ impl<'a> EchoReply<'a> {
         }
 
         println!("buffer: {:?}", buffer);
-        
+
         let type_ = buffer[0];
         let code = buffer[1];
         if type_ != P::ECHO_REPLY_TYPE || code != P::ECHO_REPLY_CODE {

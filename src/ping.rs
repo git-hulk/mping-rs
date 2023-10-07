@@ -1,4 +1,3 @@
-use std::fmt;
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
@@ -20,7 +19,7 @@ pub fn ping(
     ident: Option<u16>,
     seq_cnt: Option<u16>,
     payload: Option<&Token>,
-) -> Result<(), Error> {
+) -> Result<(), anyhow::Error> {
     let timeout = match timeout {
         Some(timeout) => Some(timeout),
         None => Some(Duration::from_secs(4)),
@@ -59,8 +58,7 @@ pub fn ping(
             let ipv4_packet = match IpV4Packet::decode(&buffer) {
                 Ok(packet) => packet,
                 Err(e) => {
-                    println!("Error1: {}", e);
-                    return Ok(());
+                    return Err(e.into());
                 }
             };
 
