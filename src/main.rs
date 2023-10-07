@@ -12,7 +12,7 @@ fn main() -> Result<(), anyhow::Error>{
 
     let pid = process::id() as u16;
 
-    mping::ping(addr, Some(timeout), Some(166), Some(pid), b"hello world")?;
+    mping::ping(addr, Some(timeout), Some(166), Some(pid),64)?;
 
     Ok(())
 }
