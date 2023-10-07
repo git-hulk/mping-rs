@@ -1,17 +1,22 @@
+use std::collections::HashMap;
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rand::random;
 use rand::Rng;
 use rate_limit::SyncLimiter;
+use ticker::Ticker;
 
 use socket2::{Domain, Protocol, Socket, Type};
 
 use pnet_packet::icmp::{self, echo_reply, echo_request, IcmpTypes};
 use pnet_packet::ipv4::Ipv4Packet;
 use pnet_packet::Packet;
+
+use crate::stat::{Buckets, Result, TargetResult};
 
 pub fn ping(
     addr: IpAddr,
@@ -24,25 +29,23 @@ pub fn ping(
         Some(timeout) => Some(timeout),
         None => Some(Duration::from_secs(5)),
     };
-
     let pid = ident.unwrap_or(random());
-
-
     let dest = SocketAddr::new(addr, 0);
-
-    let socket = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4))?;
-    socket.set_ttl(ttl.unwrap_or(64))?;
-    socket.set_write_timeout(timeout)?;
-
-    // println!("payload: {:?}", _payload);
-    // let payload = b"hello world";
 
     let rand_payload = random_bytes(len);
     let read_rand_payload = rand_payload.clone();
 
+    let buckets = Arc::new(Mutex::new(Buckets::new()));
+    let send_buckets = buckets.clone();
+    let read_buckets = buckets.clone();
+    let stat_buckets = buckets.clone();
+
     // send
     thread::spawn(move || {
-        
+        let socket = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4)).unwrap();
+        socket.set_ttl(ttl.unwrap_or(64)).unwrap();
+        socket.set_write_timeout(timeout).unwrap();
+
         let zero_payload = vec![0; len];
         let one_payload = vec![1; len];
         let fivea_payload = vec![0x5A; len];
@@ -69,6 +72,24 @@ pub fn ping(
             let checksum = icmp::checksum(&icmp_packet);
             packet.set_checksum(checksum);
 
+            let now = SystemTime::now();
+            let since_the_epoch = now.duration_since(UNIX_EPOCH).unwrap();
+            let timestamp = since_the_epoch.as_nanos();
+
+            let data = send_buckets.lock().unwrap();
+            data.add(
+                timestamp,
+                Result {
+                    txts: timestamp,
+                    target: dest.ip().to_string(),
+                    seq: seq,
+                    latency: 0,
+                    received: false,
+                    bitflip: false,
+                    ..Default::default()
+                },
+            );
+
             match socket.send_to(&mut buf, &dest.into()) {
                 Ok(_) => {}
                 Err(e) => {
@@ -79,12 +100,19 @@ pub fn ping(
         }
     });
 
+    thread::spawn(move || print_stat(stat_buckets, 5));
+
     // read
     let zero_payload = vec![0; len];
     let one_payload = vec![1; len];
     let fivea_payload = vec![0x5A; len];
 
-    let payloads: [&[u8]; 4] = [&read_rand_payload, &zero_payload, &one_payload, &fivea_payload];
+    let payloads: [&[u8]; 4] = [
+        &read_rand_payload,
+        &zero_payload,
+        &one_payload,
+        &fivea_payload,
+    ];
 
     let mut socket2 = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4))?;
     socket2.set_read_timeout(timeout)?;
@@ -127,20 +155,41 @@ pub fn ping(
         if echo_replay.get_identifier() != pid {
             continue;
         }
-        
 
         if payloads[echo_replay.get_sequence_number() as usize % payloads.len()]
             != echo_replay.payload()
         {
-            println!("bitflip detected! seq={:?},", echo_replay.get_sequence_number());
+            println!(
+                "bitflip detected! seq={:?},",
+                echo_replay.get_sequence_number()
+            );
         }
 
-        println!(
-            "Reply: id={:?}, seq={:?}, payload len={:?}",
-            echo_replay.get_identifier(),
-            echo_replay.get_sequence_number(),
-            echo_replay.payload().len()
+        let now = SystemTime::now();
+        let since_the_epoch = now.duration_since(UNIX_EPOCH).unwrap();
+        let timestamp = since_the_epoch.as_nanos();
+
+        let buckets = read_buckets.lock().unwrap();
+        buckets.add_reply(
+            timestamp/1000_000_000,
+            Result {
+                txts: timestamp,
+                rxts: timestamp,
+                target: dest.ip().to_string(),
+                seq: echo_replay.get_sequence_number(),
+                latency: 0,
+                received: true,
+                bitflip: false,
+                ..Default::default()
+            },
         );
+
+        // println!(
+        //     "Reply: id={:?}, seq={:?}, payload len={:?}",
+        //     echo_replay.get_identifier(),
+        //     echo_replay.get_sequence_number(),
+        //     echo_replay.payload().len()
+        // );
     }
 
     Ok(())
@@ -152,4 +201,98 @@ fn random_bytes(len: usize) -> Vec<u8> {
     rng.fill(&mut vec[..]);
 
     vec
+}
+
+fn print_stat(buckets: Arc<Mutex<Buckets>>, delay: u64) -> anyhow::Result<()> {
+    let delay = Duration::from_secs(delay).as_nanos(); // 5s
+    let mut last_key = 0;
+
+    let ticker = Ticker::new(0.., Duration::from_secs(1));
+    for _ in ticker {
+        let buckets = buckets.lock().unwrap();
+        let bucket = buckets.last();
+        if bucket.is_none() {
+            continue;
+        }
+
+        let bucket = bucket.unwrap();
+        if bucket.key <= last_key {
+            buckets.pop();
+            continue;
+        }
+
+        if bucket.key
+            <= SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+                - delay
+        {
+            if let Some(pop) = buckets.pop() {
+                if pop.key < bucket.key {
+                    continue;
+                }
+
+                last_key = pop.key;
+
+                // 统计和打印逻辑
+                // 统计
+                let mut target_results = HashMap::new();
+
+                for r in pop.values() {
+                    let target_result = target_results
+                        .entry(r.target.clone())
+                        .or_insert_with(|| TargetResult::default());
+
+                    target_result.latency += r.latency;
+
+                    if r.received {
+                        target_result.received += 1;
+                    } else {
+                        target_result.loss += 1;
+                    }
+                }
+
+                // 打印
+                for (target, tr) in &target_results {
+                    let total = tr.received + tr.loss;
+                    let loss_rate = if total == 0 {
+                        0.0
+                    } else {
+                        (tr.loss as f64) / (total as f64)
+                    };
+
+                    println!(
+                        "{}: {} packets transmitted, {} packets received, {:.2}% packet loss",
+                        target,
+                        total,
+                        tr.received,
+                        loss_rate * 100.0
+                    );
+
+                    if tr.received == 0 {
+                        println!(
+                            "{}: sent:{}, recv:{}, loss rate: {:.2}%, latency: {}\n",
+                            target,
+                            total,
+                            tr.received,
+                            loss_rate * 100.0,
+                            0
+                        )
+                    } else {
+                        println!(
+                            "{}: sent:{}, recv:{},  loss rate: {:.2}%, latency: {:?}\n",
+                            target,
+                            total,
+                            tr.received,
+                            loss_rate * 100.0,
+                            Duration::from_nanos(tr.latency as u64 / (tr.received as u64))
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
