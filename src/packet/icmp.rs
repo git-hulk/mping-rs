@@ -72,11 +72,14 @@ impl<'a> EchoReply<'a> {
             return Err(Error::InvalidSize)
         }
 
+        println!("buffer: {:?}", buffer);
+        
         let type_ = buffer[0];
         let code = buffer[1];
         if type_ != P::ECHO_REPLY_TYPE || code != P::ECHO_REPLY_CODE {
             return Err(Error::InvalidPacket)
         }
+
 
         let ident = (u16::from(buffer[4]) << 8) + u16::from(buffer[5]);
         let seq_cnt = (u16::from(buffer[6]) << 8) + u16::from(buffer[7]);

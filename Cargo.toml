@@ -6,7 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0.75"
 ping = "0.4.1"
 rand = "0.8.5"
-socket2 = "0.5.4"
+socket2 = { version = "0.5.4", features = ["all"] }
 thiserror = "1.0.49"
