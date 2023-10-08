@@ -13,5 +13,6 @@ rand = "0.8.5"
 rate-limit-macro = "1.0.1"
 rate_limit = "0.1.1"
 socket2 = { version = "0.5.4", features = ["all"] }
+structopt = "0.3.26"
 thiserror = "1.0.49"
 ticker = "0.1.1"

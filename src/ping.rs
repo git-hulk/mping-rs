@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rand::random;
 use rand::Rng;
 use rate_limit::SyncLimiter;
 use ticker::Ticker;
@@ -20,16 +19,16 @@ use crate::stat::{Buckets, Result, TargetResult};
 
 pub fn ping(
     addr: IpAddr,
-    timeout: Option<Duration>,
-    ttl: Option<u32>,
-    ident: Option<u16>,
+    timeout: Duration,
+    ttl: u32,
+    tos: Option<u32>,
+    ident: u16,
     len: usize,
+    rate: u64,
+    delay: u64,
 ) -> anyhow::Result<()> {
-    let timeout = match timeout {
-        Some(timeout) => Some(timeout),
-        None => Some(Duration::from_secs(5)),
-    };
-    let pid = ident.unwrap_or(random());
+
+    let pid = ident;
     let dest = SocketAddr::new(addr, 0);
 
     let rand_payload = random_bytes(len);
@@ -43,8 +42,12 @@ pub fn ping(
     // send
     thread::spawn(move || {
         let socket = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4)).unwrap();
-        socket.set_ttl(ttl.unwrap_or(64)).unwrap();
-        socket.set_write_timeout(timeout).unwrap();
+        socket.set_ttl(ttl).unwrap();
+        socket.set_write_timeout(Some(timeout)).unwrap();
+        if tos.is_some() {
+            socket.set_tos(tos.unwrap()).unwrap();
+        }
+        
 
         let zero_payload = vec![0; len];
         let one_payload = vec![1; len];
@@ -52,7 +55,7 @@ pub fn ping(
 
         let payloads: [&[u8]; 4] = [&rand_payload, &zero_payload, &one_payload, &fivea_payload];
 
-        let limiter = SyncLimiter::full(1, Duration::from_millis(1000));
+        let limiter = SyncLimiter::full(rate, Duration::from_millis(1000));
         let mut seq = 1u16;
         loop {
             limiter.take();
@@ -110,7 +113,7 @@ pub fn ping(
         }
     });
 
-    thread::spawn(move || print_stat(stat_buckets, 5));
+    thread::spawn(move || print_stat(stat_buckets, delay));
 
     // read
     let zero_payload = vec![0; len];
@@ -125,7 +128,7 @@ pub fn ping(
     ];
 
     let mut socket2 = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4))?;
-    socket2.set_read_timeout(timeout)?;
+    socket2.set_read_timeout(Some(timeout))?;
 
     let mut buffer: [u8; 2048] = [0; 2048];
 
@@ -278,17 +281,9 @@ fn print_stat(buckets: Arc<Mutex<Buckets>>, delay: u64) -> anyhow::Result<()> {
                         (tr.loss as f64) / (total as f64)
                     };
 
-                    println!(
-                        "{}: {} packets transmitted, {} packets received, {:.2}% packet loss",
-                        target,
-                        total,
-                        tr.received,
-                        loss_rate * 100.0
-                    );
-
                     if tr.received == 0 {
                         println!(
-                            "{}: sent:{}, recv:{}, loss rate: {:.2}%, latency: {}\n",
+                            "{}: sent:{}, recv:{}, loss rate: {:.2}%, latency: {}",
                             target,
                             total,
                             tr.received,
@@ -297,7 +292,7 @@ fn print_stat(buckets: Arc<Mutex<Buckets>>, delay: u64) -> anyhow::Result<()> {
                         )
                     } else {
                         println!(
-                            "{}: sent:{}, recv:{},  loss rate: {:.2}%, latency: {:?}\n",
+                            "{}: sent:{}, recv:{},  loss rate: {:.2}%, latency: {:?}",
                             target,
                             total,
                             tr.received,
