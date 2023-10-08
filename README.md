@@ -1,5 +1,5 @@
 # mping-rs
-![GitHub](https://img.shields.io/github/license/smallnest/mping-rs) ![GitHub Action](https://github.com/smallnest/mping-rs/actions/workflows/quickstart.yml/badge.svg) [![Crate](https://img.shields.io/crates/v/mping-rs.svg)](https://crates.io/crates/mping-rs)
+[![License](https://img.shields.io/:license-apache%202-blue.svg)](https://opensource.org/licenses/Apache-2.0) ![GitHub Action](https://github.com/smallnest/mping-rs/actions/workflows/quickstart.yml/badge.svg) [![Crate](https://img.shields.io/crates/v/mping-rs.svg)](https://crates.io/crates/mping-rs)
 [![API](https://docs.rs/mping-rs/badge.svg)](https://docs.rs/mping-rs)
 
 a multi-targets ping tool, which supports 10,000 packets/second, accurate latency.
