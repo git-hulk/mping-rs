@@ -106,8 +106,6 @@ impl Buckets {
         let mut map = self.map.lock().unwrap();
     
         if !map.contains_key(&key) {
-            println!("add_reply: {}", key);
-
           let bucket = Bucket::new(key);
           self.buckets.lock().unwrap().push(bucket.clone());
           map.insert(key, bucket);

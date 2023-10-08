@@ -27,7 +27,7 @@ struct Opt {
     delay: u64,
 
     #[structopt(short = "c", long = "count")]
-    count: Option<i32>,
+    count: Option<i64>,
 
     #[structopt(parse(from_os_str))]
     free: Vec<std::path::PathBuf>,
@@ -47,7 +47,7 @@ fn main() -> Result<(), anyhow::Error>{
     let timeout = Duration::from_secs(opt.timeout);
     let pid = process::id() as u16;
 
-    mping::ping(addr, timeout, opt.ttl, opt.tos, pid, opt.size,opt.rate,opt.delay)?;
+    mping::ping(addr, timeout, opt.ttl, opt.tos, pid, opt.size,opt.rate,opt.delay,opt.count)?;
 
     Ok(())
 }

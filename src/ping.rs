@@ -26,6 +26,7 @@ pub fn ping(
     len: usize,
     rate: u64,
     delay: u64,
+    count: Option<i64>,
 ) -> anyhow::Result<()> {
 
     let pid = ident;
@@ -57,6 +58,9 @@ pub fn ping(
 
         let limiter = SyncLimiter::full(rate, Duration::from_millis(1000));
         let mut seq = 1u16;
+        let mut sent_count = 0;
+
+        
         loop {
             limiter.take();
 
@@ -110,6 +114,15 @@ pub fn ping(
             }
 
             seq += 1;
+            sent_count += 1;
+            drop(data);
+
+            if count.is_some() && sent_count >= count.unwrap() {
+                thread::sleep(Duration::from_secs(delay));
+                println!("reached {} and exit", sent_count);
+                std::process::exit(0);
+            }
+
         }
     });
 
@@ -200,13 +213,6 @@ pub fn ping(
                 ..Default::default()
             },
         );
-
-        // println!(
-        //     "Reply: id={:?}, seq={:?}, payload len={:?}",
-        //     echo_reply.get_identifier(),
-        //     echo_reply.get_sequence_number(),
-        //     echo_reply.payload().len()
-        // );
     }
 
     Ok(())
@@ -231,8 +237,6 @@ fn print_stat(buckets: Arc<Mutex<Buckets>>, delay: u64) -> anyhow::Result<()> {
         if bucket.is_none() {
             continue;
         }
-
-        
 
         let bucket = bucket.unwrap();
         if bucket.key <= last_key {
