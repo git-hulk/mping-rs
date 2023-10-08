@@ -24,7 +24,7 @@ impl Clone for Bucket {
 impl Ord for Bucket {
     fn cmp(&self, other: &Bucket) -> Ordering {
         // 提取关键字进行比较
-        self.key.cmp(&other.key)
+        self.key.cmp(&other.key).reverse()
     }
 }
 
@@ -101,11 +101,11 @@ impl Buckets {
     }
 
     pub fn add_reply(&self, key: u128, result:  Result) {
-    
         let mut map = self.map.lock().unwrap();
     
-    
         if !map.contains_key(&key) {
+            println!("add_reply: {}", key);
+
           let bucket = Bucket::new(key);
           self.buckets.lock().unwrap().push(bucket.clone());
           map.insert(key, bucket);
@@ -120,7 +120,7 @@ impl Buckets {
     pub fn pop(&self) -> Option<Bucket> {
         let mut buckets = self.buckets.lock().unwrap();
         let bucket = buckets.pop()?;
-        self.map.lock().unwrap().remove(&bucket.key);
+        let bucket = self.map.lock().unwrap().remove(&bucket.key).unwrap();
         Some(bucket)
     }
 

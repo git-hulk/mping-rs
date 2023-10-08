@@ -66,19 +66,28 @@ pub fn ping(
             packet.set_sequence_number(seq);
             seq += 1;
 
-            packet.set_payload(&payload);
+            let now = SystemTime::now();
+            let since_the_epoch = now.duration_since(UNIX_EPOCH).unwrap();
+            let timestamp = since_the_epoch.as_nanos();
+
+            
+            let ts_bytes = timestamp.to_be_bytes();
+            let mut send_payload = vec![0; payload.len()];
+            send_payload[..16].copy_from_slice(&ts_bytes[..16]);
+            send_payload[16..].copy_from_slice(&payload[16..]); 
+
+            packet.set_payload(&send_payload);
+            
 
             let icmp_packet = icmp::IcmpPacket::new(packet.packet()).unwrap();
             let checksum = icmp::checksum(&icmp_packet);
             packet.set_checksum(checksum);
 
-            let now = SystemTime::now();
-            let since_the_epoch = now.duration_since(UNIX_EPOCH).unwrap();
-            let timestamp = since_the_epoch.as_nanos();
+           
 
             let data = send_buckets.lock().unwrap();
             data.add(
-                timestamp,
+                timestamp/1000_000_000,
                 Result {
                     txts: timestamp,
                     target: dest.ip().to_string(),
@@ -156,8 +165,8 @@ pub fn ping(
             continue;
         }
 
-        if payloads[echo_replay.get_sequence_number() as usize % payloads.len()]
-            != echo_replay.payload()
+        if payloads[echo_replay.get_sequence_number() as usize % payloads.len()][16..]
+            != echo_replay.payload()[16..]
         {
             println!(
                 "bitflip detected! seq={:?},",
@@ -165,15 +174,19 @@ pub fn ping(
             );
         }
 
+        let payload = echo_replay.payload();
+        let ts_bytes = &payload[..16];
+        let txts = u128::from_be_bytes(ts_bytes.try_into().unwrap());
+
         let now = SystemTime::now();
         let since_the_epoch = now.duration_since(UNIX_EPOCH).unwrap();
         let timestamp = since_the_epoch.as_nanos();
 
         let buckets = read_buckets.lock().unwrap();
         buckets.add_reply(
-            timestamp/1000_000_000,
+            txts/1000_000_000,
             Result {
-                txts: timestamp,
+                txts: txts,
                 rxts: timestamp,
                 target: dest.ip().to_string(),
                 seq: echo_replay.get_sequence_number(),
@@ -215,12 +228,14 @@ fn print_stat(buckets: Arc<Mutex<Buckets>>, delay: u64) -> anyhow::Result<()> {
             continue;
         }
 
+        
+
         let bucket = bucket.unwrap();
         if bucket.key <= last_key {
             buckets.pop();
             continue;
         }
-
+      
         if bucket.key
             <= SystemTime::now()
                 .duration_since(UNIX_EPOCH)
