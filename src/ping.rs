@@ -17,20 +17,24 @@ use pnet_packet::Packet;
 
 use crate::stat::{Buckets, Result, TargetResult};
 
+pub struct  PingOption {
+    pub timeout: Duration,
+    pub ttl: u32,
+    pub tos: Option<u32>,
+    pub ident: u16,
+    pub len: usize,
+    pub rate: u64,
+    pub delay: u64,
+    pub count: Option<i64>,
+}
+
 pub fn ping(
     addrs: Vec<IpAddr>,
-    timeout: Duration,
-    ttl: u32,
-    tos: Option<u32>,
-    ident: u16,
-    len: usize,
-    rate: u64,
-    delay: u64,
-    count: Option<i64>,
+    popt: PingOption,
 ) -> anyhow::Result<()> {
-    let pid = ident;
+    let pid = popt.ident;
 
-    let rand_payload = random_bytes(len);
+    let rand_payload = random_bytes(popt.len);
     let read_rand_payload = rand_payload.clone();
 
     let buckets = Arc::new(Mutex::new(Buckets::new()));
@@ -41,19 +45,19 @@ pub fn ping(
     // send
     thread::spawn(move || {
         let socket = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4)).unwrap();
-        socket.set_ttl(ttl).unwrap();
-        socket.set_write_timeout(Some(timeout)).unwrap();
-        if tos.is_some() {
-            socket.set_tos(tos.unwrap()).unwrap();
+        socket.set_ttl(popt.ttl).unwrap();
+        socket.set_write_timeout(Some(popt.timeout)).unwrap();
+        if let Some(tos_value) = popt.tos  {
+            socket.set_tos(tos_value).unwrap();
         }
 
-        let zero_payload = vec![0; len];
-        let one_payload = vec![1; len];
-        let fivea_payload = vec![0x5A; len];
+        let zero_payload = vec![0; popt.len];
+        let one_payload = vec![1; popt.len];
+        let fivea_payload = vec![0x5A; popt.len];
 
         let payloads: [&[u8]; 4] = [&rand_payload, &zero_payload, &one_payload, &fivea_payload];
 
-        let limiter = SyncLimiter::full(rate, Duration::from_millis(1000));
+        let limiter = SyncLimiter::full(popt.rate, Duration::from_millis(1000));
         let mut seq = 1u16;
         let mut sent_count = 0;
 
@@ -87,11 +91,11 @@ pub fn ping(
                 let dest = SocketAddr::new(*ip, 0);
                 let data = send_buckets.lock().unwrap();
                 data.add(
-                    timestamp / 1000_000_000,
+                    timestamp / 1_000_000_000,
                     Result {
                         txts: timestamp,
                         target: dest.ip().to_string(),
-                        seq: seq,
+                        seq,
                         latency: 0,
                         received: false,
                         bitflip: false,
@@ -100,7 +104,7 @@ pub fn ping(
                 );
                 drop(data);
 
-                match socket.send_to(&mut buf, &dest.into()) {
+                match socket.send_to(&buf, &dest.into()) {
                     Ok(_) => {}
                     Err(e) => {
                         error!("Error in send: {:?}", e);
@@ -112,20 +116,20 @@ pub fn ping(
             seq += 1;
             sent_count += 1;
 
-            if count.is_some() && sent_count >= count.unwrap() {
-                thread::sleep(Duration::from_secs(delay));
+            if popt.count.is_some() && sent_count >= popt.count.unwrap() {
+                thread::sleep(Duration::from_secs(popt.delay));
                 info!("reached {} and exit", sent_count);
                 std::process::exit(0);
             }
         }
     });
 
-    thread::spawn(move || print_stat(stat_buckets, delay));
+    thread::spawn(move || print_stat(stat_buckets, popt.delay));
 
     // read
-    let zero_payload = vec![0; len];
-    let one_payload = vec![1; len];
-    let fivea_payload = vec![0x5A; len];
+    let zero_payload = vec![0; popt.len];
+    let one_payload = vec![1; popt.len];
+    let fivea_payload = vec![0x5A; popt.len];
 
     let payloads: [&[u8]; 4] = [
         &read_rand_payload,
@@ -135,7 +139,7 @@ pub fn ping(
     ];
 
     let mut socket2 = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4))?;
-    socket2.set_read_timeout(Some(timeout))?;
+    socket2.set_read_timeout(Some(popt.timeout))?;
 
     let mut buffer: [u8; 2048] = [0; 2048];
 
@@ -156,7 +160,7 @@ pub fn ping(
         };
         let buf = &buffer[..size];
 
-        let ipv4_packet = Ipv4Packet::new(&buf).unwrap();
+        let ipv4_packet = Ipv4Packet::new(buf).unwrap();
         let icmp_packet = pnet_packet::icmp::IcmpPacket::new(ipv4_packet.payload()).unwrap();
 
         if icmp_packet.get_icmp_type() != IcmpTypes::EchoReply
@@ -196,16 +200,15 @@ pub fn ping(
 
         let buckets = read_buckets.lock().unwrap();
         buckets.add_reply(
-            txts / 1000_000_000,
+            txts / 1_000_000_000,
             Result {
-                txts: txts,
+                txts,
                 rxts: timestamp,
                 target: dest_ip.to_string(),
                 seq: echo_reply.get_sequence_number(),
                 latency: 0,
                 received: true,
-                bitflip: false,
-                ..Default::default()
+                bitflip: false
             },
         );
     }
@@ -260,7 +263,7 @@ fn print_stat(buckets: Arc<Mutex<Buckets>>, delay: u64) -> anyhow::Result<()> {
                 for r in pop.values() {
                     let target_result = target_results
                         .entry(r.target.clone())
-                        .or_insert_with(|| TargetResult::default());
+                        .or_insert_with(TargetResult::default);
 
                     target_result.latency += r.latency;
 
@@ -282,7 +285,7 @@ fn print_stat(buckets: Arc<Mutex<Buckets>>, delay: u64) -> anyhow::Result<()> {
 
                     if tr.received == 0 {
                         info!(
-                            "{}: sent:{}, recv:{}, loss rate: {:.2}%, latency: {}",
+                            "{}: sent:{}, recv:{}, loss rate: {:.2}%, latency: {}ms",
                             target,
                             total,
                             tr.received,
@@ -291,12 +294,12 @@ fn print_stat(buckets: Arc<Mutex<Buckets>>, delay: u64) -> anyhow::Result<()> {
                         )
                     } else {
                         info!(
-                            "{}: sent:{}, recv:{},  loss rate: {:.2}%, latency: {:?}",
+                            "{}: sent:{}, recv:{},  loss rate: {:.2}%, latency: {:.2}ms",
                             target,
                             total,
                             tr.received,
                             loss_rate * 100.0,
-                            Duration::from_nanos(tr.latency as u64 / (tr.received as u64))
+                            Duration::from_nanos(tr.latency as u64 / (tr.received as u64)).as_secs_f64()*1000.0
                         )
                     }
                 }

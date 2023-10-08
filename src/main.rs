@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Local;
-use mping;
 use structopt::StructOpt;
 
 use ipnetwork::IpNetwork;
@@ -13,7 +12,7 @@ use std::net::{IpAddr, ToSocketAddrs};
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = "mping",
-    version = "0.1.1",
+    version = "0.1.2",
     about = "A multi-targets ping tool, which supports 10,000 packets/second."
 )]
 struct Opt {
@@ -95,9 +94,17 @@ fn main() -> Result<(), anyhow::Error> {
     let timeout = Duration::from_secs(opt.timeout);
     let pid = process::id() as u16;
 
-    mping::ping(
-        ip_addrs, timeout, opt.ttl, opt.tos, pid, opt.size, opt.rate, opt.delay, opt.count,
-    )?;
+    let popt = mping::ping::PingOption {
+        timeout,
+        ttl: opt.ttl,
+        tos: opt.tos,
+        ident: pid,
+        len: opt.size,
+        rate: opt.rate,
+        delay: opt.delay,
+        count: opt.count,
+    };
+    mping::ping::ping(ip_addrs, popt)?;
 
     Ok(())
 }

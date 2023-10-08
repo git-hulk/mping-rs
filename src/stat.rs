@@ -72,6 +72,7 @@ impl Bucket {
     }
 }
 
+#[derive(Default)]
 pub struct Buckets {
     pub buckets: Mutex<BinaryHeap<Bucket>>,
     pub map: Mutex<HashMap<u128, Bucket>>,
@@ -87,14 +88,14 @@ impl Buckets {
 
     pub fn add(&self, key: u128, value: Result) {
         let mut map = self.map.lock().unwrap();
-        if !map.contains_key(&key) {
+        map.entry(key).or_insert_with(|| {
             let bucket = Bucket {
                 key,
                 value: RwLock::new(HashMap::new()),
             };
             self.buckets.lock().unwrap().push(bucket.clone());
-            map.insert(key, bucket);
-        }
+            bucket
+        });
 
         let bucket = map.get(&key).unwrap();
         bucket.add(value);
@@ -103,11 +104,10 @@ impl Buckets {
     pub fn add_reply(&self, key: u128, result: Result) {
         let mut map = self.map.lock().unwrap();
 
-        if !map.contains_key(&key) {
-            let bucket = Bucket::new(key);
-            self.buckets.lock().unwrap().push(bucket.clone());
-            map.insert(key, bucket);
-        }
+        map.entry(key).or_insert_with(|| {
+            self.buckets.lock().unwrap().push(Bucket::new(key));
+            Bucket::new(key)
+        });
 
         let bucket = map.get(&key).unwrap();
         bucket.add_reply(result);
@@ -122,7 +122,7 @@ impl Buckets {
 
     pub fn last(&self) -> Option<Bucket> {
         let buckets = self.buckets.lock().unwrap();
-        buckets.peek().map(|x| x.clone())
+        buckets.peek().cloned()
     }
 }
 
