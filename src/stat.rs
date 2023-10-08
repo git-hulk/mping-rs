@@ -52,15 +52,17 @@ impl Bucket {
 
     pub fn add(&self, result: Result) {
         let mut map = self.value.write().unwrap();
-        let key = format!("{}-{}", &result.target, result.seq);
+        let key = format!("{}-{}", &result.target, &result.seq);
         map.insert(key, result);
+       
     }
 
     pub fn add_reply(&self, mut result: Result) {
         let mut map = self.value.write().unwrap();
 
-        let key = format!("{}-{}", result.target, result.seq);
+        let key = format!("{}-{}", result.target, &result.seq);
         if let Some(_req) = map.get(&key) {
+            
             result.calc_latency();
         }
         map.insert(key, result.clone());

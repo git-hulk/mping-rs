@@ -64,8 +64,7 @@ pub fn ping(
             packet.set_icmp_type(icmp::IcmpTypes::EchoRequest);
             packet.set_identifier(pid);
             packet.set_sequence_number(seq);
-            seq += 1;
-
+            
             let now = SystemTime::now();
             let since_the_epoch = now.duration_since(UNIX_EPOCH).unwrap();
             let timestamp = since_the_epoch.as_nanos();
@@ -106,6 +105,8 @@ pub fn ping(
                     return;
                 }
             }
+
+            seq += 1;
         }
     });
 
@@ -154,27 +155,27 @@ pub fn ping(
             continue;
         }
 
-        let echo_replay = match icmp::echo_reply::EchoReplyPacket::new(icmp_packet.packet()) {
-            Some(echo_replay) => echo_replay,
+        let echo_reply = match icmp::echo_reply::EchoReplyPacket::new(icmp_packet.packet()) {
+            Some(echo_reply) => echo_reply,
             None => {
                 continue;
             }
         };
 
-        if echo_replay.get_identifier() != pid {
+        if echo_reply.get_identifier() != pid {
             continue;
         }
 
-        if payloads[echo_replay.get_sequence_number() as usize % payloads.len()][16..]
-            != echo_replay.payload()[16..]
+        if payloads[echo_reply.get_sequence_number() as usize % payloads.len()][16..]
+            != echo_reply.payload()[16..]
         {
             println!(
                 "bitflip detected! seq={:?},",
-                echo_replay.get_sequence_number()
+                echo_reply.get_sequence_number()
             );
         }
 
-        let payload = echo_replay.payload();
+        let payload = echo_reply.payload();
         let ts_bytes = &payload[..16];
         let txts = u128::from_be_bytes(ts_bytes.try_into().unwrap());
 
@@ -189,7 +190,7 @@ pub fn ping(
                 txts: txts,
                 rxts: timestamp,
                 target: dest.ip().to_string(),
-                seq: echo_replay.get_sequence_number(),
+                seq: echo_reply.get_sequence_number(),
                 latency: 0,
                 received: true,
                 bitflip: false,
@@ -199,9 +200,9 @@ pub fn ping(
 
         // println!(
         //     "Reply: id={:?}, seq={:?}, payload len={:?}",
-        //     echo_replay.get_identifier(),
-        //     echo_replay.get_sequence_number(),
-        //     echo_replay.payload().len()
+        //     echo_reply.get_identifier(),
+        //     echo_reply.get_sequence_number(),
+        //     echo_reply.payload().len()
         // );
     }
 
