@@ -1,17 +1,16 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use log::{error, info, warn};
 use rand::Rng;
 use rate_limit::SyncLimiter;
 use ticker::Ticker;
-use log::{info, warn, error};
 
 use socket2::{Domain, Protocol, Socket, Type};
-
 use pnet_packet::icmp::{self, echo_reply, echo_request, IcmpTypes};
 use pnet_packet::ipv4::Ipv4Packet;
 use pnet_packet::Packet;
@@ -256,7 +255,7 @@ fn print_stat(buckets: Arc<Mutex<Buckets>>, delay: u64) -> anyhow::Result<()> {
 
                 // 统计和打印逻辑
                 // 统计
-                let mut target_results = HashMap::new();
+                let mut target_results = BTreeMap::new();
 
                 for r in pop.values() {
                     let target_result = target_results

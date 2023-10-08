@@ -1,11 +1,11 @@
+use std::io::Write;
 use std::process;
 use std::time::Duration;
-use std::io::Write;
 
 use anyhow::Result;
+use chrono::Local;
 use mping;
 use structopt::StructOpt;
-use chrono::Local;
 
 use ipnetwork::IpNetwork;
 use std::net::{IpAddr, ToSocketAddrs};
@@ -69,12 +69,19 @@ struct Opt {
 
 fn main() -> Result<(), anyhow::Error> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-    .format(|buf, record| writeln!(buf,"{} [{}] {}",
-    Local::now().format("%H:%M:%S"),record.level(), record.args()))
-    .init();
-    
+        .format(|buf, record| {
+            writeln!(
+                buf,
+                "{} [{}] {}",
+                Local::now().format("%H:%M:%S"),
+                record.level(),
+                record.args()
+            )
+        })
+        .init();
+
     let opt = Opt::from_args();
-    
+
     if opt.free.is_empty() {
         println!("Please input ip address");
         return Ok(());
