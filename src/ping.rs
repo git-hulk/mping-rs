@@ -13,12 +13,12 @@ use socket2::{Domain, Protocol, Socket, Type};
 
 use pnet_packet::icmp::{self, echo_reply, echo_request, IcmpTypes};
 use pnet_packet::ipv4::Ipv4Packet;
-use pnet_packet::Packet;
+use pnet_packet::{ip, Packet};
 
 use crate::stat::{Buckets, Result, TargetResult};
 
 pub fn ping(
-    addr: IpAddr,
+    addrs: Vec<IpAddr>,
     timeout: Duration,
     ttl: u32,
     tos: Option<u32>,
@@ -28,9 +28,7 @@ pub fn ping(
     delay: u64,
     count: Option<i64>,
 ) -> anyhow::Result<()> {
-
     let pid = ident;
-    let dest = SocketAddr::new(addr, 0);
 
     let rand_payload = random_bytes(len);
     let read_rand_payload = rand_payload.clone();
@@ -48,7 +46,6 @@ pub fn ping(
         if tos.is_some() {
             socket.set_tos(tos.unwrap()).unwrap();
         }
-        
 
         let zero_payload = vec![0; len];
         let one_payload = vec![1; len];
@@ -60,7 +57,6 @@ pub fn ping(
         let mut seq = 1u16;
         let mut sent_count = 0;
 
-        
         loop {
             limiter.take();
 
@@ -71,58 +67,57 @@ pub fn ping(
             packet.set_icmp_type(icmp::IcmpTypes::EchoRequest);
             packet.set_identifier(pid);
             packet.set_sequence_number(seq);
-            
+
             let now = SystemTime::now();
             let since_the_epoch = now.duration_since(UNIX_EPOCH).unwrap();
             let timestamp = since_the_epoch.as_nanos();
 
-            
             let ts_bytes = timestamp.to_be_bytes();
             let mut send_payload = vec![0; payload.len()];
             send_payload[..16].copy_from_slice(&ts_bytes[..16]);
-            send_payload[16..].copy_from_slice(&payload[16..]); 
+            send_payload[16..].copy_from_slice(&payload[16..]);
 
             packet.set_payload(&send_payload);
-            
 
             let icmp_packet = icmp::IcmpPacket::new(packet.packet()).unwrap();
             let checksum = icmp::checksum(&icmp_packet);
             packet.set_checksum(checksum);
 
-           
+            for ip in &addrs {
+                let dest = SocketAddr::new(*ip, 0);
+                let data = send_buckets.lock().unwrap();
+                data.add(
+                    timestamp / 1000_000_000,
+                    Result {
+                        txts: timestamp,
+                        target: dest.ip().to_string(),
+                        seq: seq,
+                        latency: 0,
+                        received: false,
+                        bitflip: false,
+                        ..Default::default()
+                    },
+                );
+                drop(data);
 
-            let data = send_buckets.lock().unwrap();
-            data.add(
-                timestamp/1000_000_000,
-                Result {
-                    txts: timestamp,
-                    target: dest.ip().to_string(),
-                    seq: seq,
-                    latency: 0,
-                    received: false,
-                    bitflip: false,
-                    ..Default::default()
-                },
-            );
-
-            match socket.send_to(&mut buf, &dest.into()) {
-                Ok(_) => {}
-                Err(e) => {
-                    println!("Error in send: {:?}", e);
-                    return;
+                match socket.send_to(&mut buf, &dest.into()) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        println!("Error in send: {:?}", e);
+                        return;
+                    }
                 }
             }
 
             seq += 1;
             sent_count += 1;
-            drop(data);
+            
 
             if count.is_some() && sent_count >= count.unwrap() {
                 thread::sleep(Duration::from_secs(delay));
                 println!("reached {} and exit", sent_count);
                 std::process::exit(0);
             }
-
         }
     });
 
@@ -194,6 +189,8 @@ pub fn ping(
         let payload = echo_reply.payload();
         let ts_bytes = &payload[..16];
         let txts = u128::from_be_bytes(ts_bytes.try_into().unwrap());
+        let dest_ip = ipv4_packet.get_source();
+
 
         let now = SystemTime::now();
         let since_the_epoch = now.duration_since(UNIX_EPOCH).unwrap();
@@ -201,11 +198,11 @@ pub fn ping(
 
         let buckets = read_buckets.lock().unwrap();
         buckets.add_reply(
-            txts/1000_000_000,
+            txts / 1000_000_000,
             Result {
                 txts: txts,
                 rxts: timestamp,
-                target: dest.ip().to_string(),
+                target: dest_ip.to_string(),
                 seq: echo_reply.get_sequence_number(),
                 latency: 0,
                 received: true,
@@ -243,7 +240,7 @@ fn print_stat(buckets: Arc<Mutex<Buckets>>, delay: u64) -> anyhow::Result<()> {
             buckets.pop();
             continue;
         }
-      
+
         if bucket.key
             <= SystemTime::now()
                 .duration_since(UNIX_EPOCH)

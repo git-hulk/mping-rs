@@ -6,6 +6,9 @@ use mping;
 use anyhow::Result;
 use structopt::StructOpt;
 
+use ipnetwork::IpNetwork;
+use std::net::IpAddr;
+
 #[derive(Debug, StructOpt)]
 struct Opt {
     #[structopt(short = "w", long = "timeout", default_value = "1")]
@@ -43,11 +46,35 @@ fn main() -> Result<(), anyhow::Error>{
 
     let _ = opt.count;
 
-    let addr = opt.free.last().unwrap().to_string_lossy().parse()?;
+    let addrs = opt.free.last().unwrap().to_string_lossy();
+    let ip_addrs = parse_ips(&addrs);
+
+
     let timeout = Duration::from_secs(opt.timeout);
     let pid = process::id() as u16;
 
-    mping::ping(addr, timeout, opt.ttl, opt.tos, pid, opt.size,opt.rate,opt.delay,opt.count)?;
+    mping::ping(ip_addrs, timeout, opt.ttl, opt.tos, pid, opt.size,opt.rate,opt.delay,opt.count)?;
 
     Ok(())
+}
+
+fn parse_ips(input: &str) -> Vec<IpAddr> {
+    let mut ips = Vec::new();
+
+    for s in input.split(',') {
+        match s.parse::<IpNetwork>() {
+            Ok(network) => {
+                for ip in network.iter() {
+                    ips.push(ip);
+                }
+            }
+            Err(_) => {
+                if let Ok(ip) = s.parse::<IpAddr>() {
+                    ips.push(ip);
+                }
+            }
+        }
+    }
+
+    ips
 }
