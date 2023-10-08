@@ -54,7 +54,6 @@ impl Bucket {
         let mut map = self.value.write().unwrap();
         let key = format!("{}-{}", &result.target, &result.seq);
         map.insert(key, result);
-       
     }
 
     pub fn add_reply(&self, mut result: Result) {
@@ -62,7 +61,6 @@ impl Bucket {
 
         let key = format!("{}-{}", result.target, &result.seq);
         if let Some(_req) = map.get(&key) {
-            
             result.calc_latency();
         }
         map.insert(key, result.clone());
@@ -74,7 +72,7 @@ impl Bucket {
     }
 }
 
-pub  struct Buckets {
+pub struct Buckets {
     pub buckets: Mutex<BinaryHeap<Bucket>>,
     pub map: Mutex<HashMap<u128, Bucket>>,
 }
@@ -102,20 +100,18 @@ impl Buckets {
         bucket.add(value);
     }
 
-    pub fn add_reply(&self, key: u128, result:  Result) {
+    pub fn add_reply(&self, key: u128, result: Result) {
         let mut map = self.map.lock().unwrap();
-    
+
         if !map.contains_key(&key) {
-          let bucket = Bucket::new(key);
-          self.buckets.lock().unwrap().push(bucket.clone());
-          map.insert(key, bucket);
+            let bucket = Bucket::new(key);
+            self.buckets.lock().unwrap().push(bucket.clone());
+            map.insert(key, bucket);
         }
 
         let bucket = map.get(&key).unwrap();
         bucket.add_reply(result);
-    
-      }
-    
+    }
 
     pub fn pop(&self) -> Option<Bucket> {
         let mut buckets = self.buckets.lock().unwrap();
@@ -162,5 +158,5 @@ pub struct TargetResult {
     pub latency: u128,
     pub loss: u32,
     pub received: u32,
-    pub bitflip_count: u32   
-  }
+    pub bitflip_count: u32,
+}

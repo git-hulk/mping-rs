@@ -7,7 +7,10 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.75"
+chrono = "0.4.31"
+env_logger = "0.10.0"
 ipnetwork = "0.20.0"
+log = "0.4.20"
 ping = "0.4.1"
 pnet_packet = "0.34.0"
 rand = "0.8.5"

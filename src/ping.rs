@@ -8,12 +8,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rand::Rng;
 use rate_limit::SyncLimiter;
 use ticker::Ticker;
+use log::{info, warn, error};
 
 use socket2::{Domain, Protocol, Socket, Type};
 
 use pnet_packet::icmp::{self, echo_reply, echo_request, IcmpTypes};
 use pnet_packet::ipv4::Ipv4Packet;
-use pnet_packet::{ip, Packet};
+use pnet_packet::Packet;
 
 use crate::stat::{Buckets, Result, TargetResult};
 
@@ -103,7 +104,7 @@ pub fn ping(
                 match socket.send_to(&mut buf, &dest.into()) {
                     Ok(_) => {}
                     Err(e) => {
-                        println!("Error in send: {:?}", e);
+                        error!("Error in send: {:?}", e);
                         return;
                     }
                 }
@@ -111,11 +112,10 @@ pub fn ping(
 
             seq += 1;
             sent_count += 1;
-            
 
             if count.is_some() && sent_count >= count.unwrap() {
                 thread::sleep(Duration::from_secs(delay));
-                println!("reached {} and exit", sent_count);
+                info!("reached {} and exit", sent_count);
                 std::process::exit(0);
             }
         }
@@ -150,7 +150,7 @@ pub fn ping(
                         continue;
                     }
                 }
-                println!("Error in read: {:?}", &e);
+                error!("Error in read: {:?}", &e);
 
                 break;
             }
@@ -180,7 +180,7 @@ pub fn ping(
         if payloads[echo_reply.get_sequence_number() as usize % payloads.len()][16..]
             != echo_reply.payload()[16..]
         {
-            println!(
+            warn!(
                 "bitflip detected! seq={:?},",
                 echo_reply.get_sequence_number()
             );
@@ -190,7 +190,6 @@ pub fn ping(
         let ts_bytes = &payload[..16];
         let txts = u128::from_be_bytes(ts_bytes.try_into().unwrap());
         let dest_ip = ipv4_packet.get_source();
-
 
         let now = SystemTime::now();
         let since_the_epoch = now.duration_since(UNIX_EPOCH).unwrap();
@@ -283,7 +282,7 @@ fn print_stat(buckets: Arc<Mutex<Buckets>>, delay: u64) -> anyhow::Result<()> {
                     };
 
                     if tr.received == 0 {
-                        println!(
+                        info!(
                             "{}: sent:{}, recv:{}, loss rate: {:.2}%, latency: {}",
                             target,
                             total,
@@ -292,7 +291,7 @@ fn print_stat(buckets: Arc<Mutex<Buckets>>, delay: u64) -> anyhow::Result<()> {
                             0
                         )
                     } else {
-                        println!(
+                        info!(
                             "{}: sent:{}, recv:{},  loss rate: {:.2}%, latency: {:?}",
                             target,
                             total,

@@ -1,4 +1,3 @@
-pub mod errors;
 mod ping;
 pub mod stat;
 
